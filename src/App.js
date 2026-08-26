@@ -332,7 +332,117 @@ function ImpactSection({ impactData, onChange, triggerToast }) {
     </Section>
   )
 }
+// ─── MAIN APP COMPONENT ──────────────────────────────────────────────────────
+export default function App() {
+  const [root, setRoot] = useState(loadRoot)
+  const [toast, setToast] = useState(null)
+  const [currentUser, setCurrentUser] = useState("Team Member")
 
+  // ── REALTIME SYNC LISTENER ────────────────────────────────────────────────
+  useEffect(() => {
+    // 1. Supabase Postgres Changes Listener
+    const channel = supabase
+      .channel('public-data-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'meetings' },
+        () => {
+          if (root.settings?.sheetsUrl) {
+            fetchRemoteState(root.settings.sheetsUrl).then((remote) => {
+              if (remote) setRoot(remote)
+            })
+          }
+        }
+      )
+      .subscribe()
+
+    // 2. Backup 3-second auto-fetch pulse for shared sessions
+    const interval = setInterval(async () => {
+      if (root.settings?.sheetsUrl) {
+        const remote = await fetchRemoteState(root.settings.sheetsUrl)
+        if (remote) setRoot(remote)
+      }
+    }, 3000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(interval)
+    }
+  }, [root.settings?.sheetsUrl])
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const triggerToast = (msg) => setToast(msg)
+  const activeMeeting = root.meetings.find((m) => m.id === root.activeMeetingId) || root.meetings[0]
+
+  const updateActiveMeeting = (updatedFields) => {
+    const updatedMeetings = root.meetings.map((m) =>
+      m.id === activeMeeting.id ? { ...m, ...updatedFields } : m
+    )
+    const nextRoot = { ...root, meetings: updatedMeetings }
+    setRoot(nextRoot)
+    saveRoot(nextRoot)
+    if (root.settings?.sheetsUrl) {
+      pushRemoteState(root.settings.sheetsUrl, nextRoot)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8" style={FB}>
+      <style>{FONT_IMPORT}</style>
+
+      {/* Top Header */}
+      <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+          <h1 className="text-3xl text-indigo-950" style={FH}>
+            CHEZACHEZA MMM TRACKER
+          </h1>
+          <p className="text-xs text-slate-500 font-medium mt-1">
+            Live Weekly Operations & Hub Attendance
+          </p>
+        </div>
+        <button
+          onClick={() => exportMeetingToCSV(activeMeeting)}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-sm transition-colors flex items-center gap-2"
+        >
+          📥 Export CSV Report
+        </button>
+      </header>
+
+      {/* Main Sections */}
+      <main className="max-w-6xl mx-auto space-y-6">
+        <ImpactSection
+          impactData={activeMeeting.impactData}
+          onChange={(newImpact) => updateActiveMeeting({ impactData: newImpact })}
+          triggerToast={triggerToast}
+        />
+
+        <DepartmentSection
+          departments={activeMeeting.departments}
+          currentUser={currentUser}
+          onChange={(newDepts) => updateActiveMeeting({ departments: newDepts })}
+          triggerToast={triggerToast}
+        />
+
+        <StaffingSection
+          staffing={activeMeeting.staffing}
+          onChange={(newStaffing) => updateActiveMeeting({ staffing: newStaffing })}
+          triggerToast={triggerToast}
+        />
+
+        <AnnouncementsSection
+          announcements={activeMeeting.announcements}
+          currentUser={currentUser}
+          onChange={(newAnn) => updateActiveMeeting({ announcements: newAnn })}
+          triggerToast={triggerToast}
+          onNotifyUrgent={(ann) => pushRemoteState(root.settings?.sheetsUrl, root, ann)}
+        />
+      </main>
+
+      {/* Toast Notification */}
+      {toast && <SuccessToast message={toast} onClose={() => setToast(null)} />}
+    </div>
+  )
+}
 function DepartmentSection({ departments, onChange, currentUser, triggerToast }) {
   const [exp, setExp] = useState(true)
 
