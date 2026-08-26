@@ -357,55 +357,157 @@ export default function App() {
 
   // ── REALTIME SYNC LISTENER ────────────────────────────────────────────────
   useEffect(() => {
-    // 1. Supabase Postgres Changes Listener
-    const channel = supabase
-      .channel('public-data-sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'meetings' },
-        () => {
-          if (root.settings?.sheetsUrl) {
-            fetchRemoteState(root.settings.sheetsUrl).then((remote) => {
-              if (remote) setRoot(remote)
-            })
+    import React, { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ─── Supabase Configuration ─────────────────────────────────────────────────
+const SUPABASE_URL = "https://mtadbfenjfrdajibcejc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_iDbnGOE2uFlfIEF3GAmpnA_ty72jKsi";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─── Brand Theme ─────────────────────────────────────────────────────────────
+const B = {
+  indigo:  "#3c3b8e",
+  teal:    "#00afaa",
+  orange:  "#f97316",
+  magenta: "#d4147a",
+  green:   "#22c55e",
+  red:     "#ef4444",
+  blue:    "#3b82f6",
+  purple:  "#7c3aed",
+  gold:    "#d4af37",
+};
+
+const FH = { fontFamily: "'Ranchers', cursive", fontWeight: 400, letterSpacing: "0.02em" };
+const FB = { fontFamily: "'Noto Sans', sans-serif" };
+const FM = { fontFamily: "monospace" };
+
+function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
+
+function emptyHub(name) {
+  return { id: uid(), name, junior: "", senior: "", signedConsent: "", missingConsent: "", newStudents: "" };
+}
+
+// ─── Default 4 Regions Setup ────────────────────────────────────────────────
+const DEFAULT_IMPACT = [
+  { name: "Mathare",      color: B.magenta, hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) },
+  { name: "Kibera North", color: B.indigo,  hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) },
+  { name: "Kibera South", color: B.teal,    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) },
+  { name: "Eastlands",    color: B.orange,  hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) },
+];
+
+const DEFAULT_DEPTS = [
+  { id: "comm-kn", name: "Community Kibera North", iconKey: "👥", category: "programs" },
+  { id: "comm-ks", name: "Community Kibera South", iconKey: "👥", category: "programs" },
+  { id: "comm-mt", name: "Community Mathare",      iconKey: "👥", category: "programs" },
+  { id: "comm-el", name: "Community Eastlands",    iconKey: "👥", category: "programs" },
+  { id: "happy",   name: "Happy Schools",          iconKey: "⭐", category: "programs" },
+  { id: "beat",    name: "The BEAT",               iconKey: "🏆", category: "programs" },
+  { id: "allstars",name: "AllStars",               iconKey: "🌿", category: "programs" },
+  { id: "strat",   name: "Strategic Comms & Partnerships", iconKey: "📢", category: "departmental" },
+  { id: "gc",      name: "Guidance & Counseling / Safeguarding", iconKey: "🛡️", category: "departmental" },
+  { id: "finance", name: "Finance",                iconKey: "💰", category: "departmental" },
+  { id: "hr",      name: "HR",                     iconKey: "👥", category: "departmental" },
+  { id: "procure", name: "Procurement",            iconKey: "🔧", category: "departmental" },
+];
+
+const STORAGE_KEY = "chezacheza_mmm_v11";
+
+function sumHub(h) {
+  const j = Math.max(0, parseInt(h.junior) || 0);
+  const s = Math.max(0, parseInt(h.senior) || 0);
+  const sc = Math.max(0, parseInt(h.signedConsent) || 0);
+  const mc = Math.max(0, parseInt(h.missingConsent) || 0);
+  const ns = Math.max(0, parseInt(h.newStudents) || 0);
+  return { total: j + s, j, s, sc, mc, ns };
+}
+
+function createMeeting(wk, defs) {
+  return {
+    id: uid(),
+    weekNumber: wk,
+    date: new Date().toISOString().split("T")[0],
+    status: "draft",
+    impactData: DEFAULT_IMPACT.map(c => ({ ...c, id: uid(), hubs: c.hubs.map(h => ({ ...h, id: uid() })) })),
+    departments: defs.map(d => ({ ...d, update: "", actionItems: [], expanded: true, reported: false, updatedBy: "", sticker: "pending", isLocked: false })),
+    staffing: { entrants: [], exits: [], onLeave: [], mathareOffice: [] },
+    announcements: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function loadRoot() {
+  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch (e) {}
+  const initialMeeting = createMeeting(29, DEFAULT_DEPTS);
+  return { meetings: [initialMeeting], activeMeetingId: initialMeeting.id, settings: { sheetsUrl: "", departments: DEFAULT_DEPTS } };
+}
+
+function saveRoot(s) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {}
+}
+
+// ─── MAIN APP COMPONENT ─────────────────────────────────────────────────────
+export default function App() {
+  const [root, setRoot] = useState(loadRoot);
+  const activeMeeting = root.meetings.find((m) => m.id === root.activeMeetingId) || root.meetings[0];
+
+  // REALTIME SYNCHRONIZATION & AUTO-REPAIR FOR 4 REGIONS
+  useEffect(() => {
+    const loadData = async () => {
+      const { data, error } = await supabase.from("meetings").select("*");
+      if (data && data.length > 0 && !error) {
+        const dbMeetings = data.map((row) => {
+          const meeting = row.data || row;
+          
+          // Auto-repair: restore any missing regions from DEFAULT_IMPACT
+          const existingRegionNames = (meeting.impactData || []).map(r => r.name);
+          const missingRegions = DEFAULT_IMPACT.filter(def => !existingRegionNames.includes(def.name));
+
+          if (missingRegions.length > 0) {
+            const restoredImpact = [
+              ...(meeting.impactData || []),
+              ...missingRegions.map(c => ({ ...c, id: uid(), hubs: c.hubs.map(h => ({ ...h, id: uid() })) }))
+            ];
+            return { ...meeting, impactData: restoredImpact };
           }
-        }
-      )
-      .subscribe()
+          return meeting;
+        });
 
-    // 2. Backup 3-second auto-fetch pulse for shared sessions
-    const interval = setInterval(async () => {
-      if (root.settings?.sheetsUrl) {
-        const remote = await fetchRemoteState(root.settings.sheetsUrl)
-        if (remote) setRoot(remote)
+        setRoot((prev) => ({ ...prev, meetings: dbMeetings }));
       }
-    }, 3000)
+    };
 
-    return () => {
-      supabase.removeChannel(channel)
-      clearInterval(interval)
-    }
-  }, [root.settings?.sheetsUrl])
-  // ──────────────────────────────────────────────────────────────────────────
+    loadData();
 
-  const triggerToast = (msg) => setToast(msg)
-  const activeMeeting = root.meetings.find((m) => m.id === root.activeMeetingId) || root.meetings[0]
+    const channel = supabase
+      .channel("public-data-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "meetings" }, () => loadData())
+      .subscribe();
 
-  const updateActiveMeeting = (updatedFields) => {
-    const updatedMeetings = root.meetings.map((m) =>
-      m.id === activeMeeting.id ? { ...m, ...updatedFields } : m
-    )
-    const nextRoot = { ...root, meetings: updatedMeetings }
-    setRoot(nextRoot)
-    saveRoot(nextRoot)
-    if (root.settings?.sheetsUrl) {
-      pushRemoteState(root.settings.sheetsUrl, nextRoot)
-    }
-  }
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // PERSIST CHANGES TO SUPABASE & LOCAL STORAGE
+  const updateActiveMeeting = async (updatedFields) => {
+    const updatedMeeting = { ...activeMeeting, ...updatedFields };
+    const updatedMeetings = root.meetings.map((m) => m.id === activeMeeting.id ? updatedMeeting : m);
+    const nextRoot = { ...root, meetings: updatedMeetings };
+
+    setRoot(nextRoot);
+    saveRoot(nextRoot);
+
+    await supabase.from("meetings").upsert({ id: activeMeeting.id, data: updatedMeeting });
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8" style={FB}>
-      <style>{FONT_IMPORT}</style>
+    <div className="p-6 max-w-7xl mx-auto" style={FB}>
+      <h1 className="text-2xl font-bold mb-4" style={FH}>ChezaCheza MMM Dashboard</h1>
+      {/* Visual sections load here */}
+    </div>
+  );
+}
+
+    return () => {
 
       {/* Top Header */}
       <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
