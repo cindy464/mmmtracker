@@ -37,11 +37,28 @@ function emptyHub(name) {
   return { id: uid(), name, junior: "", senior: "", signedConsent: "", missingConsent: "", newStudents: "" }
 }
 
-const DEFAULT_IMPACT = [
-  { name: "Mathare",      color: B.magenta, hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) },
-  { name: "Kibera North", color: B.indigo,  hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) },
-  { name: "Kibera South", color: B.teal,    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) },
-  { name: "Eastlands",    color: B.orange,  hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) },
+
+  const DEFAULT_IMPACT = [
+  { 
+    name: "Mathare", 
+    color: B.magenta, 
+    hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) 
+  },
+  { 
+    name: "Kibera North", 
+    color: B.indigo, 
+    hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) 
+  },
+  { 
+    name: "Kibera South", 
+    color: B.teal, 
+    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) 
+  },
+  { 
+    name: "Eastlands", 
+    color: B.orange, 
+    hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) 
+  },
 ]
 
 const DEFAULT_DEPTS = [
