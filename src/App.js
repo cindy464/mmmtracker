@@ -927,7 +927,7 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
   )
 }
 
-export default function ChezaChezaApp() {
+export function ChezaChezaApp() {
   const [root, setRoot] = useState(null)
   const [userEmail, setUserEmail] = useState("")
   const [isEmailVerified, setIsEmailVerified] = useState(false)
