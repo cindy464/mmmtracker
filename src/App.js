@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import { createClient } from "@supabase/supabase-js"
+import Anthropic from "@anthropic-ai/sdk"
+import logoImg from "@/imports/Screenshot_2026-06-09_151556-1.png"
 
 // ─── Brand Theme ─────────────────────────────────────────────────────────────
 const B = {
@@ -37,28 +39,11 @@ function emptyHub(name) {
   return { id: uid(), name, junior: "", senior: "", signedConsent: "", missingConsent: "", newStudents: "" }
 }
 
-
-  const DEFAULT_IMPACT = [
-  { 
-    name: "Mathare", 
-    color: B.magenta, 
-    hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) 
-  },
-  { 
-    name: "Kibera North", 
-    color: B.indigo, 
-    hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) 
-  },
-  { 
-    name: "Kibera South", 
-    color: B.teal, 
-    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) 
-  },
-  { 
-    name: "Eastlands", 
-    color: B.orange, 
-    hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) 
-  },
+const DEFAULT_IMPACT = [
+  { name: "Mathare",      color: B.magenta, hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) },
+  { name: "Kibera North", color: B.indigo,  hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) },
+  { name: "Kibera South", color: B.teal,    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) },
+  { name: "Eastlands",    color: B.orange,  hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) },
 ]
 
 const DEFAULT_DEPTS = [
@@ -79,6 +64,31 @@ const DEFAULT_DEPTS = [
 const STORAGE_KEY = "chezacheza_mmm_v11"
 const AUTH_USER_KEY = "chezacheza_auth_user_v2"
 const AUTO_SAVE_DEBOUNCE_MS = 800
+
+const ADMIN_EMAILS = new Set([
+  "cindy@chezachezadance.org",
+  "kelvin@chezachezadance.org",
+  "francis@chezachezadance.org",
+  "franco@chezachezadance.org",
+  "collins@chezachezadance.org",
+])
+
+const MEMO_ADJECTIVES = ["Teal", "Indigo", "Golden", "Coral", "Violet", "Magenta", "Amber"]
+const MEMO_NOUNS = ["Dance", "Leap", "Spin", "Groove", "Rhythm", "Beat", "Flow", "Vibe", "Pulse"]
+function suggestPin() {
+  const a = MEMO_ADJECTIVES[Math.floor(Math.random() * MEMO_ADJECTIVES.length)]
+  const n = MEMO_NOUNS[Math.floor(Math.random() * MEMO_NOUNS.length)]
+  const d = String(Math.floor(Math.random() * 90) + 10)
+  return `${a}${n}${d}`
+}
+
+function getISOWeek(dateStr: string): number {
+  if (!dateStr) return 1
+  const d = new Date(dateStr + "T00:00:00")
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7))
+  const yearStart = new Date(d.getFullYear(), 0, 1)
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+}
 
 const SC = {
   pending:      { label: "Pending",      bg: "#fff7ed", border: "#f97316", text: "#c2410c", icon: "🕒" },
@@ -146,7 +156,7 @@ function createMeeting(wk, defs) {
     date: new Date().toISOString().split("T")[0],
     status: "draft",
     impactData: DEFAULT_IMPACT.map(c => ({ ...c, id: uid(), hubs: c.hubs.map(h => ({ ...h, id: uid() })) })),
-    departments: defs.map(d => ({ ...d, update: "", actionItems: [], expanded: true, reported: false, updatedBy: "", sticker: "pending", isLocked: false })),
+    departments: defs.map(d => ({ ...d, update: "", actionItems: [], expanded: true, reported: false, updatedBy: "", sticker: "pending", isLocked: false, deptPassword: "" })),
     staffing: { entrants: [], exits: [], onLeave: [], mathareOffice: [] },
     announcements: [],
     createdAt: new Date().toISOString(),
@@ -214,11 +224,9 @@ function Section({ title, icon, color, badge, expanded, onToggle, children }) {
         <span className="text-lg">{icon}</span>
         <span className="flex-1 font-bold text-sm uppercase tracking-wider" style={{ ...FH, color: B.indigo }}>{title}</span>
         {badge != null && <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: color + "22", color, ...FB }}>{badge}</span>}
-        }
         <span className="text-gray-400">{expanded ? "▲" : "▼"}</span>
       </button>
       {expanded && <div className="bg-white border-t px-5 py-4 space-y-4" style={{ borderColor: "#f0eff9" }}>{children}</div>}
-      }
     </div>
   )
 }
@@ -349,253 +357,62 @@ function ImpactSection({ impactData, onChange, triggerToast }) {
     </Section>
   )
 }
-// ─── MAIN APP COMPONENT ──────────────────────────────────────────────────────
-export default function App() {
-  const [root, setRoot] = useState(loadRoot)
-  const [toast, setToast] = useState(null)
-  const [currentUser, setCurrentUser] = useState("Team Member")
 
-  // ── REALTIME SYNC LISTENER ────────────────────────────────────────────────
-  useEffect(() => {
-    import React, { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-// ─── Supabase Configuration ─────────────────────────────────────────────────
-const SUPABASE_URL = "https://mtadbfenjfrdajibcejc.supabase.co";
-const SUPABASE_KEY = "sb_publishable_iDbnGOE2uFlfIEF3GAmpnA_ty72jKsi";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// ─── Brand Theme ─────────────────────────────────────────────────────────────
-const B = {
-  indigo:  "#3c3b8e",
-  teal:    "#00afaa",
-  orange:  "#f97316",
-  magenta: "#d4147a",
-  green:   "#22c55e",
-  red:     "#ef4444",
-  blue:    "#3b82f6",
-  purple:  "#7c3aed",
-  gold:    "#d4af37",
-};
-
-const FH = { fontFamily: "'Ranchers', cursive", fontWeight: 400, letterSpacing: "0.02em" };
-const FB = { fontFamily: "'Noto Sans', sans-serif" };
-const FM = { fontFamily: "monospace" };
-
-function uid() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
-
-function emptyHub(name) {
-  return { id: uid(), name, junior: "", senior: "", signedConsent: "", missingConsent: "", newStudents: "" };
-}
-
-// ─── Default 4 Regions Setup ────────────────────────────────────────────────
-const DEFAULT_IMPACT = [
-  { name: "Mathare",      color: B.magenta, hubs: ["St.Lwang'a", "MathareNorth", "T.Area", "Dandora 2"].map(emptyHub) },
-  { name: "Kibera North", color: B.indigo,  hubs: ["Vuma", "Ayany", "Rongai", "Ruiru", "Dagoretti"].map(emptyHub) },
-  { name: "Kibera South", color: B.teal,    hubs: ["Ayany", "Kambi Muru", "Kisumu Ndogo", "Gatwekera", "Mashimoni", "DC"].map(emptyHub) },
-  { name: "Eastlands",    color: B.orange,  hubs: ["Korogocho", "LungaLunga", "Mukuru kwa Rueben", "Dandora 4", "Dandora 5"].map(emptyHub) },
-];
-
-const DEFAULT_DEPTS = [
-  { id: "comm-kn", name: "Community Kibera North", iconKey: "👥", category: "programs" },
-  { id: "comm-ks", name: "Community Kibera South", iconKey: "👥", category: "programs" },
-  { id: "comm-mt", name: "Community Mathare",      iconKey: "👥", category: "programs" },
-  { id: "comm-el", name: "Community Eastlands",    iconKey: "👥", category: "programs" },
-  { id: "happy",   name: "Happy Schools",          iconKey: "⭐", category: "programs" },
-  { id: "beat",    name: "The BEAT",               iconKey: "🏆", category: "programs" },
-  { id: "allstars",name: "AllStars",               iconKey: "🌿", category: "programs" },
-  { id: "strat",   name: "Strategic Comms & Partnerships", iconKey: "📢", category: "departmental" },
-  { id: "gc",      name: "Guidance & Counseling / Safeguarding", iconKey: "🛡️", category: "departmental" },
-  { id: "finance", name: "Finance",                iconKey: "💰", category: "departmental" },
-  { id: "hr",      name: "HR",                     iconKey: "👥", category: "departmental" },
-  { id: "procure", name: "Procurement",            iconKey: "🔧", category: "departmental" },
-];
-
-const STORAGE_KEY = "chezacheza_mmm_v11";
-
-function sumHub(h) {
-  const j = Math.max(0, parseInt(h.junior) || 0);
-  const s = Math.max(0, parseInt(h.senior) || 0);
-  const sc = Math.max(0, parseInt(h.signedConsent) || 0);
-  const mc = Math.max(0, parseInt(h.missingConsent) || 0);
-  const ns = Math.max(0, parseInt(h.newStudents) || 0);
-  return { total: j + s, j, s, sc, mc, ns };
-}
-
-function createMeeting(wk, defs) {
-  return {
-    id: uid(),
-    weekNumber: wk,
-    date: new Date().toISOString().split("T")[0],
-    status: "draft",
-    impactData: DEFAULT_IMPACT.map(c => ({ ...c, id: uid(), hubs: c.hubs.map(h => ({ ...h, id: uid() })) })),
-    departments: defs.map(d => ({ ...d, update: "", actionItems: [], expanded: true, reported: false, updatedBy: "", sticker: "pending", isLocked: false })),
-    staffing: { entrants: [], exits: [], onLeave: [], mathareOffice: [] },
-    announcements: [],
-    createdAt: new Date().toISOString(),
-  };
-}
-
-function loadRoot() {
-  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch (e) {}
-  const initialMeeting = createMeeting(29, DEFAULT_DEPTS);
-  return { meetings: [initialMeeting], activeMeetingId: initialMeeting.id, settings: { sheetsUrl: "", departments: DEFAULT_DEPTS } };
-}
-
-function saveRoot(s) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch(e) {}
-}
-
-// ─── MAIN APP COMPONENT ─────────────────────────────────────────────────────
-export default function App() {
-  const [root, setRoot] = useState(loadRoot);
-  const activeMeeting = root.meetings.find((m) => m.id === root.activeMeetingId) || root.meetings[0];
-
-  // REALTIME SYNCHRONIZATION & AUTO-REPAIR FOR 4 REGIONS
-  useEffect(() => {
-    const loadData = async () => {
-      const { data, error } = await supabase.from("meetings").select("*");
-      if (data && data.length > 0 && !error) {
-        const dbMeetings = data.map((row) => {
-          const meeting = row.data || row;
-          
-          // Auto-repair: restore any missing regions from DEFAULT_IMPACT
-          const existingRegionNames = (meeting.impactData || []).map(r => r.name);
-          const missingRegions = DEFAULT_IMPACT.filter(def => !existingRegionNames.includes(def.name));
-
-          if (missingRegions.length > 0) {
-            const restoredImpact = [
-              ...(meeting.impactData || []),
-              ...missingRegions.map(c => ({ ...c, id: uid(), hubs: c.hubs.map(h => ({ ...h, id: uid() })) }))
-            ];
-            return { ...meeting, impactData: restoredImpact };
-          }
-          return meeting;
-        });
-
-        setRoot((prev) => ({ ...prev, meetings: dbMeetings }));
-      }
-    };
-
-    loadData();
-
-    const channel = supabase
-      .channel("public-data-sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "meetings" }, () => loadData())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  // PERSIST CHANGES TO SUPABASE & LOCAL STORAGE
-  const updateActiveMeeting = async (updatedFields) => {
-    const updatedMeeting = { ...activeMeeting, ...updatedFields };
-    const updatedMeetings = root.meetings.map((m) => m.id === activeMeeting.id ? updatedMeeting : m);
-    const nextRoot = { ...root, meetings: updatedMeetings };
-
-    setRoot(nextRoot);
-    saveRoot(nextRoot);
-
-    await supabase.from("meetings").upsert({ id: activeMeeting.id, data: updatedMeeting });
-  };
-
-  return (
-    <div className="p-6 max-w-7xl mx-auto" style={FB}>
-      <h1 className="text-2xl font-bold mb-4" style={FH}>ChezaCheza MMM Dashboard</h1>
-      {/* Visual sections load here */}
-    </div>
-  );
-}
-
-    return () => {
-
-      {/* Top Header */}
-      <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <h1 className="text-3xl text-indigo-950" style={FH}>
-            CHEZACHEZA MMM TRACKER
-          </h1>
-          <p className="text-xs text-slate-500 font-medium mt-1">
-            Live Weekly Operations & Hub Attendance
-          </p>
-        </div>
-        <button
-          onClick={() => exportMeetingToCSV(activeMeeting)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-sm transition-colors flex items-center gap-2"
-        >
-          📥 Export CSV Report
-        </button>
-      </header>
-
-      {/* Main Sections */}
-      <main className="max-w-6xl mx-auto space-y-6">
-        <ImpactSection
-          impactData={activeMeeting.impactData}
-          onChange={(newImpact) => updateActiveMeeting({ impactData: newImpact })}
-          triggerToast={triggerToast}
-        />
-
-        <DepartmentSection
-          departments={activeMeeting.departments}
-          currentUser={currentUser}
-          onChange={(newDepts) => updateActiveMeeting({ departments: newDepts })}
-          triggerToast={triggerToast}
-        />
-
-        <StaffingSection
-          staffing={activeMeeting.staffing}
-          onChange={(newStaffing) => updateActiveMeeting({ staffing: newStaffing })}
-          triggerToast={triggerToast}
-        />
-
-        <AnnouncementsSection
-          announcements={activeMeeting.announcements}
-          currentUser={currentUser}
-          onChange={(newAnn) => updateActiveMeeting({ announcements: newAnn })}
-          triggerToast={triggerToast}
-          onNotifyUrgent={(ann) => pushRemoteState(root.settings?.sheetsUrl, root, ann)}
-        />
-      </main>
-
-      {/* Toast Notification */}
-      {toast && <SuccessToast message={toast} onClose={() => setToast(null)} />}
-    </div>
-  )
-}
 function DepartmentSection({ departments, onChange, currentUser, triggerToast }) {
   const [exp, setExp] = useState(true)
+  // lockFlow: { deptId, type: "set"|"unlock", input: string, error: string, suggestion: string } | null
+  const [lockFlow, setLockFlow] = useState<any>(null)
 
   function updateDept(id, updates) {
     const updated = departments.map(d => d.id === id ? { ...d, ...updates, updatedBy: currentUser } : d)
     onChange(updated)
-    triggerToast("Department report updated.")
   }
 
   function addActionItem(deptId) {
-    const newItem = {
-      id: uid(), text: "", owner: currentUser, deadline: "", status: "pending", department: deptId, weekId: ""
-    }
-    const updated = departments.map(d => d.id === deptId ? { ...d, actionItems: [...(d.actionItems || []), newItem] } : d)
-    onChange(updated)
+    const newItem = { id: uid(), text: "", owner: currentUser, deadline: "", status: "pending", department: deptId, weekId: "" }
+    onChange(departments.map(d => d.id === deptId ? { ...d, actionItems: [...(d.actionItems || []), newItem] } : d))
     triggerToast("Action item added.")
   }
 
   function updateActionItem(deptId, itemId, updates) {
-    const updated = departments.map(d => {
-      if (d.id !== deptId) return d
-      return {
-        ...d,
-        actionItems: d.actionItems.map(a => a.id === itemId ? { ...a, ...updates } : a)
-      }
-    })
-    onChange(updated)
-    triggerToast("Action item updated.")
+    onChange(departments.map(d => d.id !== deptId ? d : { ...d, actionItems: d.actionItems.map(a => a.id === itemId ? { ...a, ...updates } : a) }))
   }
 
   function deleteActionItem(deptId, itemId) {
-    const updated = departments.map(d => d.id === deptId ? { ...d, actionItems: d.actionItems.filter(a => a.id !== itemId) } : d)
-    onChange(updated)
+    onChange(departments.map(d => d.id === deptId ? { ...d, actionItems: d.actionItems.filter(a => a.id !== itemId) } : d))
     triggerToast("Action item removed.")
+  }
+
+  function handleLockClick(dept) {
+    if (dept.isLocked) {
+      setLockFlow({ deptId: dept.id, type: "unlock", input: "", error: "", suggestion: "" })
+    } else {
+      if (!dept.deptPassword) {
+        setLockFlow({ deptId: dept.id, type: "set", input: "", error: "", suggestion: suggestPin() })
+      } else {
+        updateDept(dept.id, { isLocked: true })
+        triggerToast(`${dept.name} locked.`)
+      }
+    }
+  }
+
+  function submitLockFlow(dept) {
+    if (!lockFlow) return
+    const val = lockFlow.input.trim()
+    if (!val) { setLockFlow({ ...lockFlow, error: "Please enter a password or PIN." }); return }
+    if (lockFlow.type === "set") {
+      updateDept(dept.id, { deptPassword: val, isLocked: true })
+      setLockFlow(null)
+      triggerToast(`${dept.name} locked. Remember your password!`)
+    } else {
+      if (val === dept.deptPassword) {
+        updateDept(dept.id, { isLocked: false })
+        setLockFlow(null)
+        triggerToast(`${dept.name} unlocked.`)
+      } else {
+        setLockFlow({ ...lockFlow, error: "Incorrect password. Try again." })
+      }
+    }
   }
 
   return (
@@ -603,24 +420,70 @@ function DepartmentSection({ departments, onChange, currentUser, triggerToast })
       <div className="space-y-6">
         {departments.map(dept => {
           const currentSticker = SC[dept.sticker || "pending"]
+          const isFlowActive = lockFlow?.deptId === dept.id
+
           return (
             <div key={dept.id} className="border border-gray-200 rounded-2xl p-4 bg-white shadow-sm space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-3">
                 <div className="flex items-center gap-2">
                   <span className="font-extrabold text-indigo-950 text-base" style={{ ...FH }}>{dept.name}</span>
                   {dept.isLocked && <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">🔒 Locked</span>}
-                  }
                 </div>
-
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1" style={{ background: currentSticker.bg, borderColor: currentSticker.border, color: currentSticker.text }}>
                     {currentSticker.icon} {currentSticker.label}
                   </span>
-                  <button onClick={() => updateDept(dept.id, { isLocked: !dept.isLocked })} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700">
-                    {dept.isLocked ? <span className="text-amber-600">🔒</span> : <span>🔓</span>}
+                  <button
+                    onClick={() => isFlowActive ? setLockFlow(null) : handleLockClick(dept)}
+                    className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                    title={dept.isLocked ? "Unlock" : "Lock"}
+                  >
+                    {dept.isLocked ? <span className="text-amber-600">🔒</span> : <span className="text-gray-400">🔓</span>}
                   </button>
                 </div>
               </div>
+
+              {/* Lock / set-password inline flow */}
+              {isFlowActive && (
+                <div className="rounded-xl p-3.5 border space-y-2.5" style={{ background: lockFlow.type === "set" ? "#fffbeb" : "#fefce8", borderColor: "#fbbf24" }}>
+                  {lockFlow.type === "set" ? (
+                    <>
+                      <p className="text-xs font-bold text-amber-900">🔐 Set a password to lock this department</p>
+                      <p className="text-[11px] text-amber-700">Only you will be able to unlock it. Pick something memorable.</p>
+                      <div className="flex items-center gap-2 bg-amber-100/60 rounded-lg px-3 py-2 border border-amber-200">
+                        <span className="text-[11px] text-amber-800 font-semibold">💡 Suggestion:</span>
+                        <code className="text-xs font-bold text-amber-900">{lockFlow.suggestion}</code>
+                        <button
+                          className="ml-auto text-[11px] text-amber-700 underline hover:text-amber-900"
+                          onClick={() => setLockFlow({ ...lockFlow, input: lockFlow.suggestion })}
+                        >Use this</button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs font-bold text-amber-900">🔑 Enter password to unlock <span style={{ color: B.indigo }}>{dept.name}</span></p>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      className="flex-1 text-xs border border-amber-300 rounded-lg px-3 py-2 bg-white focus:outline-none font-mono"
+                      placeholder="Enter password or PIN..."
+                      value={lockFlow.input}
+                      autoFocus
+                      onChange={e => setLockFlow({ ...lockFlow, input: e.target.value, error: "" })}
+                      onKeyDown={e => e.key === "Enter" && submitLockFlow(dept)}
+                    />
+                    <button
+                      onClick={() => submitLockFlow(dept)}
+                      className="text-xs font-bold px-4 py-2 rounded-lg text-white"
+                      style={{ background: B.indigo }}
+                    >
+                      {lockFlow.type === "set" ? "Lock" : "Unlock"}
+                    </button>
+                    <button onClick={() => setLockFlow(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Cancel</button>
+                  </div>
+                  {lockFlow.error && <p className="text-xs text-red-600 font-bold">{lockFlow.error}</p>}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-gray-700 mb-1">Weekly Operational Update / Narrative</label>
@@ -643,7 +506,6 @@ function DepartmentSection({ departments, onChange, currentUser, triggerToast })
                     </button>
                   )}
                 </div>
-
                 <div className="space-y-2">
                   {dept.actionItems?.map(item => {
                     const st = SC[item.status]
@@ -684,9 +546,7 @@ function DepartmentSection({ departments, onChange, currentUser, triggerToast })
                             <option value="protected">🛡️ Protected</option>
                           </select>
                           {!dept.isLocked && (
-                            <button onClick={() => deleteActionItem(dept.id, item.id)} className="text-gray-400 hover:text-red-600 p-1">
-                              🗑️
-                            </button>
+                            <button onClick={() => deleteActionItem(dept.id, item.id)} className="text-gray-400 hover:text-red-600 p-1">🗑️</button>
                           )}
                         </div>
                       </div>
@@ -855,7 +715,6 @@ function AnnouncementsSection({ announcements, onChange, currentUser, triggerToa
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   {a.isUrgent && <span className="bg-red-600 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase">Urgent</span>}
-                  }
                   <span className="font-bold text-xs">{a.postedBy}</span>
                   <span className="text-[10px] text-gray-400">{a.date}</span>
                 </div>
@@ -872,11 +731,221 @@ function AnnouncementsSection({ announcements, onChange, currentUser, triggerToa
   )
 }
 
+const AI_KEY_STORAGE = "chezacheza_anthropic_key"
+
+const AI_CATEGORIES = [
+  {
+    key: "summary",
+    label: "📋 Team Summary",
+    tagline: "Executive brief of this week's updates",
+    color: B.teal,
+    buildPrompt: (meeting: any) => {
+      const lines = meeting.departments.map(d => {
+        const acts = (d.actionItems || []).map(a => `    • [${a.status.toUpperCase()}] ${a.text || "(untitled)"} — ${a.owner || "unassigned"}`).join("\n")
+        return `${d.name} (${(d.sticker || "pending").toUpperCase()})\n  Update: ${d.update || "(no update)"}\n  Actions:\n${acts || "    (none)"}`
+      }).join("\n\n")
+      return `You are an executive assistant summarising a Monthly Management Meeting (MMM) for ChezaCheza Dance — a youth dance organisation across Mathare, Kibera, and Eastlands, Nairobi.\n\nWeek ${meeting.weekNumber} department updates:\n\n${lines}\n\nWrite a concise 3–5 sentence executive summary for senior leadership. Highlight overall momentum, any departments at risk, and 1–2 wins. Professional tone, no bullet points.`
+    },
+  },
+  {
+    key: "management",
+    label: "💡 Management Tips",
+    tagline: "Practical leadership ideas for community programme managers",
+    color: B.indigo,
+    buildPrompt: () =>
+      "Give 3 practical, specific management tips for leaders of youth dance and community development programmes in informal urban settlements in Nairobi. Make them immediately actionable and grounded in the realities of NGO/community programme work. Write in clear, warm, professional English.",
+  },
+  {
+    key: "wellness",
+    label: "🌿 Wellness Tips",
+    tagline: "Staff wellbeing and self-care ideas",
+    color: B.green,
+    buildPrompt: () =>
+      "Share 3 meaningful wellness and self-care tips specifically for community development workers and programme staff who work in challenging environments. Include one physical, one mental, and one social tip. Keep it warm, practical, and encouraging.",
+  },
+  {
+    key: "nutrition",
+    label: "🥗 Nutrition Tips",
+    tagline: "Healthy eating for active community workers",
+    color: B.orange,
+    buildPrompt: () =>
+      "Give 3 practical, affordable nutrition tips for active community programme staff and youth workers in Nairobi. Consider local foods, budget constraints, and busy schedules. Keep it positive and realistic.",
+  },
+  {
+    key: "motivation",
+    label: "🎯 Team Motivation",
+    tagline: "An uplifting message for the ChezaCheza team",
+    color: B.magenta,
+    buildPrompt: (meeting: any) =>
+      `Write a short, heartfelt motivational message (3–4 sentences) for the ChezaCheza Dance team this week (Week ${meeting.weekNumber}). They work tirelessly in youth dance programmes across Mathare, Kibera, and Eastlands in Nairobi, changing young lives through movement. Make it specific, uplifting, and genuine — not generic.`,
+  },
+]
+
+function AISummaryPanel({ meeting }) {
+  const [expanded, setExpanded] = useState(true)
+  const [activeKey, setActiveKey] = useState("summary")
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(AI_KEY_STORAGE) || "" } catch { return "" } })
+  const [showSettings, setShowSettings] = useState(false)
+  const [keyInput, setKeyInput] = useState("")
+  const [response, setResponse] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const abortRef = useRef<AbortController | null>(null)
+
+  const activeCat = AI_CATEGORIES.find(c => c.key === activeKey) || AI_CATEGORIES[0]
+
+  function saveKey() {
+    const k = keyInput.trim()
+    if (!k) return
+    try { localStorage.setItem(AI_KEY_STORAGE, k) } catch { /* noop */ }
+    setApiKey(k)
+    setKeyInput("")
+    setShowSettings(false)
+    setError("")
+  }
+
+  async function generate() {
+    if (!apiKey) { setShowSettings(true); return }
+    if (abortRef.current) abortRef.current.abort()
+    abortRef.current = new AbortController()
+    setLoading(true)
+    setResponse("")
+    setError("")
+
+    try {
+      const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
+      const stream = await client.messages.stream({
+        model: "claude-opus-5",
+        max_tokens: 600,
+        messages: [{ role: "user", content: activeCat.buildPrompt(meeting) }],
+      })
+      for await (const chunk of stream) {
+        if (abortRef.current?.signal.aborted) break
+        if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") {
+          setResponse(prev => prev + chunk.delta.text)
+        }
+      }
+    } catch (err: any) {
+      if (err?.name === "AbortError") return
+      setError(
+        err?.message?.includes("401") || err?.message?.includes("Authentication")
+          ? "API key invalid or expired — check your key in ⚙ Settings below."
+          : `Something went wrong: ${err?.message || "unknown error"}`
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden shadow-sm border mb-5 bg-white" style={{ borderColor: "#e4e2f4", borderLeftWidth: 4, borderLeftColor: B.teal }}>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-3 px-5 py-3.5 bg-white hover:bg-gray-50/80 transition-colors text-left"
+      >
+        <span className="text-lg">✨</span>
+        <span className="flex-1 font-bold text-sm uppercase tracking-wider" style={{ ...FH, color: B.teal }}>AI Assistant</span>
+        {response && !loading && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: B.teal + "18", color: B.teal }}>Ready</span>}
+        <span className="text-gray-400">{expanded ? "▲" : "▼"}</span>
+      </button>
+
+      {expanded && (
+        <div className="border-t px-5 py-4 space-y-4" style={{ borderColor: "#f0eff9" }}>
+
+          {/* Category chips */}
+          <div className="flex flex-wrap gap-2">
+            {AI_CATEGORIES.map(cat => (
+              <button
+                key={cat.key}
+                onClick={() => { setActiveKey(cat.key); setResponse(""); setError("") }}
+                className="text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all"
+                style={activeKey === cat.key
+                  ? { background: cat.color, color: "white", borderColor: cat.color }
+                  : { background: "white", color: "#555", borderColor: "#e0dff5" }}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-[11px] text-gray-400 italic -mt-1">{activeCat.tagline}</p>
+
+          {/* Action row */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={generate}
+              disabled={loading}
+              className="text-xs font-bold px-5 py-2.5 rounded-xl text-white flex items-center gap-2 transition-all disabled:opacity-60"
+              style={{ background: loading ? activeCat.color + "88" : activeCat.color }}
+            >
+              {loading ? <><span className="animate-spin inline-block">⟳</span> Thinking…</> : <>✨ Ask Claude</>}
+            </button>
+            {loading && (
+              <button onClick={() => { abortRef.current?.abort(); setLoading(false) }} className="text-xs text-gray-400 hover:text-red-500">Stop</button>
+            )}
+            {response && !loading && (
+              <button onClick={generate} className="text-xs underline" style={{ color: activeCat.color }}>Regenerate</button>
+            )}
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 font-medium">{error}</div>
+          )}
+
+          {/* Response output */}
+          {(response || loading) && (
+            <div className="rounded-xl p-4 text-sm leading-relaxed border" style={{ background: activeCat.color + "0a", borderColor: activeCat.color + "30", color: "#1a2340", ...FB }}>
+              {response || <span className="text-gray-400 italic text-xs">Writing…</span>}
+              {loading && response && <span className="animate-pulse" style={{ color: activeCat.color }}>▍</span>}
+            </div>
+          )}
+
+          {/* API key settings — tucked away */}
+          <div className="pt-1 border-t border-gray-100">
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              className="text-[11px] text-gray-400 hover:text-gray-600 flex items-center gap-1"
+            >
+              ⚙ {apiKey ? "API key saved" : "Connect API key"} {showSettings ? "▲" : "▼"}
+            </button>
+
+            {showSettings && (
+              <div className="mt-2 p-3 rounded-xl border space-y-2" style={{ background: "#f8f8ff", borderColor: "#e0dff5" }}>
+                <p className="text-[11px] text-gray-500">Your Anthropic API key — stored only in this browser, sent directly to Anthropic.</p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="sk-ant-..."
+                    className="flex-1 text-xs border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none font-mono"
+                    value={keyInput}
+                    onChange={e => setKeyInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && saveKey()}
+                  />
+                  <button onClick={saveKey} className="text-xs font-bold px-4 py-2 rounded-lg text-white" style={{ background: B.teal }}>Save</button>
+                  {apiKey && (
+                    <button
+                      onClick={() => { try { localStorage.removeItem(AI_KEY_STORAGE) } catch { /* noop */ }; setApiKey(""); setResponse("") }}
+                      className="text-xs text-gray-400 hover:text-red-500 px-2"
+                    >Clear</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToast, currentUser, settings, onUpdateSettings }) {
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState("")
   const [passError, setPassError] = useState(false)
-  const [spawnWk, setSpawnWk] = useState(meeting.weekNumber + 1)
+  const todayStr = new Date().toISOString().split("T")[0]
+  const [spawnDate, setSpawnDate] = useState(todayStr)
+  const spawnWk = getISOWeek(spawnDate)
 
   function handleUnlock(e) {
     e.preventDefault()
@@ -907,7 +976,6 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
             onChange={e => setPasswordInput(e.target.value)}
           />
           {passError && <p className="text-xs text-red-600 font-bold">Incorrect password. Please try again.</p>}
-          }
           <button type="submit" className="w-full bg-indigo-900 hover:bg-indigo-950 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider">
             Unlock Admin Panel
           </button>
@@ -951,15 +1019,16 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
             </button>
 
             <div className="flex items-center gap-2 bg-indigo-950/60 p-1.5 rounded-xl border border-indigo-700/50">
-              <span className="text-xs text-indigo-300 font-bold px-1">Spawn Week:</span>
+              <span className="text-xs text-indigo-300 font-bold px-1 whitespace-nowrap">Spawn Week:</span>
               <input
-                type="number"
-                className="w-16 text-xs bg-white text-gray-900 font-bold px-2 py-1 rounded focus:outline-none"
-                value={spawnWk}
-                onChange={e => setSpawnWk(parseInt(e.target.value) || meeting.weekNumber + 1)}
+                type="date"
+                className="text-xs bg-white text-gray-900 font-bold px-2 py-1 rounded focus:outline-none"
+                value={spawnDate}
+                onChange={e => setSpawnDate(e.target.value)}
               />
+              <span className="text-[11px] text-indigo-200 font-semibold whitespace-nowrap">ISO Wk {spawnWk}</span>
               <button
-                onClick={() => { onSpawnWeek(spawnWk); triggerToast(`Created Week ${spawnWk} Log`); }}
+                onClick={() => { onSpawnWeek(spawnWk, spawnDate); triggerToast(`Created Week ${spawnWk} Log (${spawnDate})`); }}
                 className="bg-teal-500 hover:bg-teal-600 text-white font-bold text-xs px-3 py-1 rounded-lg flex items-center gap-1 transition-colors"
               >
                 <span>➕</span> Spawn
@@ -977,7 +1046,7 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
                 <div className="font-semibold flex items-center gap-1 text-white">
                   {cfg.icon} {cfg.label}
                 </div>
-                <div className="text-2xl font-extrabold text-white mt-1" style={{ ...FH }}>{count}</div>
+                <div className="text-3xl font-extrabold mt-1" style={{ ...FH, color: B.gold }}>{count}</div>
               </div>
             )
           })}
@@ -1015,7 +1084,6 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
                     <span className="font-bold text-sm text-indigo-950" style={{ ...FB }}>{dept.name}</span>
                     <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
                       {dept.update ? dept.update : <span className="italic text-gray-400">No narrative report logged yet.</span>}
-                      }
                     </p>
                   </div>
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full border whitespace-nowrap" style={{ background: currentSticker.bg, borderColor: currentSticker.border, color: currentSticker.text }}>
@@ -1046,7 +1114,7 @@ function EnhancedAdminPanel({ meeting, onUpdateMeeting, onSpawnWeek, triggerToas
   )
 }
 
-export function ChezaChezaApp() {
+export default function ChezaChezaApp() {
   const [root, setRoot] = useState(null)
   const [userEmail, setUserEmail] = useState("")
   const [isEmailVerified, setIsEmailVerified] = useState(false)
@@ -1054,6 +1122,7 @@ export function ChezaChezaApp() {
   const [viewMode, setViewMode] = useState("team")
   const [toastMessage, setToastMessage] = useState(null)
   const [syncStatus, setSyncStatus] = useState("Connecting to shared workspace...")
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const saveTimer = useRef(null)
   const supabaseReady = useRef(false)
 
@@ -1159,14 +1228,18 @@ export function ChezaChezaApp() {
     setRoot({ ...root, settings: { ...root.settings, ...updates } })
   }
 
-  function handleSpawnWeek(wkNum) {
+  function handleSpawnWeek(wkNum, dateStr?) {
     if (!root) return
-    const newM = createMeeting(wkNum, root.settings.departments)
-    setRoot({
-      ...root,
-      meetings: [newM, ...root.meetings],
-      activeMeetingId: newM.id
-    })
+    const newM = { ...createMeeting(wkNum, root.settings.departments), date: dateStr || new Date().toISOString().split("T")[0] }
+    setRoot({ ...root, meetings: [newM, ...root.meetings], activeMeetingId: newM.id })
+  }
+
+  function handleDeleteWeek(meetingId) {
+    if (!root || root.meetings.length <= 1) return
+    const remaining = root.meetings.filter(m => m.id !== meetingId)
+    const newActive = remaining.find(m => m.id === root.activeMeetingId) ? root.activeMeetingId : remaining[0].id
+    setRoot({ ...root, meetings: remaining, activeMeetingId: newActive })
+    showSuccessToast("Week log deleted.")
   }
 
   function notifyUrgentAnnouncement(announcement) {
@@ -1185,46 +1258,76 @@ export function ChezaChezaApp() {
       {toastMessage && <SuccessToast message={toastMessage} onClose={() => setToastMessage(null)} />}
 
       {!isEmailVerified ? (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-indigo-950 via-indigo-900 to-purple-950 px-4 py-12 relative overflow-hidden">
-          <div className="bg-white/95 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl max-w-md w-full border border-white/20 text-center relative z-10 space-y-6">
-            <div>
-              <div className="w-16 h-16 bg-indigo-50 rounded-2xl mx-auto flex items-center justify-center border border-indigo-100 mb-3 text-indigo-700 shadow-sm text-2xl">
-                🌐
-              </div>
-              <h1 className="text-3xl text-indigo-950 tracking-wide" style={{ ...FH }}>ChezaCheza Dance</h1>
-              <p className="text-xs font-semibold text-indigo-700 uppercase tracking-widest mt-1" style={{ ...FB }}>
+        <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden" style={{ background: B.indigo }}>
+          {/* Colour band across the top — echoes the logo letters */}
+          <div className="absolute top-0 left-0 right-0 h-2 flex">
+            <div className="flex-1" style={{ background: B.orange }} />
+            <div className="flex-1" style={{ background: B.teal }} />
+            <div className="flex-1" style={{ background: B.magenta }} />
+            <div className="flex-1" style={{ background: B.green }} />
+            <div className="flex-1" style={{ background: B.gold }} />
+            <div className="flex-1" style={{ background: B.red }} />
+          </div>
+
+          {/* Subtle background shapes */}
+          <div className="absolute top-16 right-0 w-64 h-64 rounded-full opacity-10" style={{ background: B.teal }} />
+          <div className="absolute bottom-8 left-0 w-48 h-48 rounded-full opacity-10" style={{ background: B.magenta }} />
+
+          <div className="bg-white p-8 sm:p-10 rounded-3xl shadow-2xl max-w-md w-full text-center relative z-10 space-y-6">
+            {/* Logo */}
+            <div className="flex flex-col items-center gap-3">
+              <img src={logoImg} alt="ChezaCheza Dance" className="h-14 w-auto object-contain" />
+              <div className="h-0.5 w-16 rounded-full" style={{ background: B.orange }} />
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: B.indigo, ...FB }}>
                 MMM Internal Workspace Portal
               </p>
             </div>
 
             <form onSubmit={handleEmailSubmit} className="space-y-4 text-left">
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Organization Email</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-gray-400">✉️</span>
-                  <input
-                    type="email"
-                    placeholder="name@chezachezadance.org"
-                    className="w-full text-xs border border-gray-300 rounded-xl pl-9 pr-3 py-2.5 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 font-medium"
-                    value={userEmail}
-                    onChange={e => setUserEmail(e.target.value)}
-                  />
-                </div>
+                <label className="block text-xs font-bold mb-1" style={{ color: B.indigo }}>Organization Email</label>
+                <input
+                  type="email"
+                  placeholder="name@chezachezadance.org"
+                  className="w-full text-sm border-2 rounded-xl px-4 py-2.5 bg-white text-gray-900 focus:outline-none font-medium transition-colors"
+                  style={{ borderColor: "#e4e2f4" }}
+                  onFocus={e => e.target.style.borderColor = B.teal}
+                  onBlur={e => e.target.style.borderColor = "#e4e2f4"}
+                  value={userEmail}
+                  onChange={e => setUserEmail(e.target.value)}
+                />
               </div>
 
               {emailError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2">
-                  <span>⚠️</span> {emailError}
+                <div className="border p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2" style={{ background: "#fff0ee", borderColor: B.red, color: B.red }}>
+                  <span>⚠</span> {emailError}
                 </div>
               )}
 
               <button
                 type="submit"
-                className="w-full bg-gradient-to-r from-indigo-700 to-indigo-900 hover:from-indigo-800 hover:to-indigo-950 text-white font-bold rounded-xl py-3 text-xs tracking-wider uppercase transition-all shadow-md flex items-center justify-center gap-2"
+                className="w-full text-white font-bold rounded-xl py-3 text-sm tracking-wider uppercase transition-all shadow-md"
+                style={{ background: B.teal }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#009a9a")}
+                onMouseLeave={e => (e.currentTarget.style.background = B.teal)}
               >
-                <span>🚪</span> Verify Workspace Access
+                Enter Workspace
               </button>
             </form>
+
+            <p className="text-[11px] text-gray-400" style={{ ...FB }}>
+              Access is restricted to @chezachezadance.org email addresses
+            </p>
+          </div>
+
+          {/* Bottom colour band */}
+          <div className="absolute bottom-0 left-0 right-0 h-1.5 flex">
+            <div className="flex-1" style={{ background: B.red }} />
+            <div className="flex-1" style={{ background: B.gold }} />
+            <div className="flex-1" style={{ background: B.green }} />
+            <div className="flex-1" style={{ background: B.magenta }} />
+            <div className="flex-1" style={{ background: B.teal }} />
+            <div className="flex-1" style={{ background: B.orange }} />
           </div>
         </div>
       ) : (
@@ -1237,29 +1340,33 @@ export function ChezaChezaApp() {
                   <span className="text-xs text-gray-500 font-medium">Logged in as: <strong className="text-indigo-900">{userEmail}</strong></span>
                 </div>
 
-                {/* Top-right controls: admin access button + view select + logout */}
+                {/* Top-right controls: admin (email-gated) + logout */}
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setViewMode(viewMode === "admin" ? "team" : "admin")}
-                    className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors"
-                    style={{
-                      background: viewMode === "admin" ? B.indigo : "white",
-                      color: viewMode === "admin" ? "white" : B.indigo,
-                      borderColor: B.indigo,
-                    }}
-                    title="Admin Panel Access"
-                  >
-                    🔑 Admin
-                  </button>
+                  {ADMIN_EMAILS.has(userEmail.toLowerCase().trim()) && (
+                    <>
+                      <button
+                        onClick={() => setViewMode(viewMode === "admin" ? "team" : "admin")}
+                        className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors"
+                        style={{
+                          background: viewMode === "admin" ? B.indigo : "white",
+                          color: viewMode === "admin" ? "white" : B.indigo,
+                          borderColor: B.indigo,
+                        }}
+                        title="Admin Panel Access"
+                      >
+                        🔑 Admin
+                      </button>
 
-                  <select
-                    className="text-xs border rounded-lg font-bold px-2.5 py-1.5 cursor-pointer bg-white text-indigo-950 border-gray-300"
-                    value={viewMode}
-                    onChange={e => setViewMode(e.target.value)}
-                  >
-                    <option value="team">👥 Team Editor View</option>
-                    <option value="admin">🛡️ Executive Admin View</option>
-                  </select>
+                      <select
+                        className="text-xs border rounded-lg font-bold px-2.5 py-1.5 cursor-pointer bg-white text-indigo-950 border-gray-300"
+                        value={viewMode}
+                        onChange={e => setViewMode(e.target.value)}
+                      >
+                        <option value="team">👥 Team Editor View</option>
+                        <option value="admin">🛡️ Executive Admin View</option>
+                      </select>
+                    </>
+                  )}
 
                   <button
                     onClick={() => {
@@ -1275,7 +1382,7 @@ export function ChezaChezaApp() {
               </div>
 
               <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Active Log:</span>
                   <select
                     className="text-xs font-bold bg-indigo-50 text-indigo-900 border border-indigo-200 rounded-lg px-2.5 py-1"
@@ -1286,6 +1393,26 @@ export function ChezaChezaApp() {
                       <option key={m.id} value={m.id}>Week {m.weekNumber} Log ({m.date})</option>
                     ))}
                   </select>
+                  {ADMIN_EMAILS.has(userEmail.toLowerCase().trim()) && root.meetings.length > 1 && (
+                    deleteConfirm === activeMeeting.id ? (
+                      <span className="flex items-center gap-1.5 text-xs">
+                        <span className="text-red-700 font-bold">Delete this week?</span>
+                        <button
+                          onClick={() => { handleDeleteWeek(activeMeeting.id); setDeleteConfirm(null) }}
+                          className="bg-red-600 text-white font-bold px-2.5 py-0.5 rounded-lg text-[11px]"
+                        >Yes, delete</button>
+                        <button onClick={() => setDeleteConfirm(null)} className="text-gray-500 hover:text-gray-700 text-[11px] underline">Cancel</button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirm(activeMeeting.id)}
+                        className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 rounded-lg px-2.5 py-1 flex items-center gap-1 transition-colors"
+                        title="Delete this week log"
+                      >
+                        🗑️ Delete
+                      </button>
+                    )
+                  )}
                 </div>
                 <span className="text-[11px] font-semibold text-indigo-600 flex items-center gap-1.5" style={{ ...FB }}>
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -1327,6 +1454,8 @@ export function ChezaChezaApp() {
                   onChange={data => updateActiveMeeting({ impactData: data })}
                   triggerToast={showSuccessToast}
                 />
+
+                <AISummaryPanel meeting={activeMeeting} />
 
                 <DepartmentSection
                   departments={activeMeeting.departments}
